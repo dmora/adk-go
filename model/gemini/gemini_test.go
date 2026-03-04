@@ -232,12 +232,7 @@ func TestModel_RespectsRequestModel(t *testing.T) {
 				Model:    tt.reqModel,
 				Contents: genai.Text("ping"),
 			}
-			for _, err := range geminiModel.GenerateContent(t.Context(), req, false) {
-				// We expect an error since we're using a fake transport.
-				// We only care about verifying the URL.
-				if err != nil {
-					t.Logf("GenerateContent error (expected): %v", err)
-				}
+			for range geminiModel.GenerateContent(t.Context(), req, false) {
 			}
 
 			if capturedURL == "" {
