@@ -381,7 +381,10 @@ func (lf *LiveFlow) bufferToolCalls(
 }
 
 func hashCall(name string, args map[string]any) string {
-	data, _ := json.Marshal(args)
+	data, err := json.Marshal(args)
+	if err != nil {
+		data = []byte(fmt.Sprintf("%v", args))
+	}
 	h := sha256.Sum256(append([]byte(name+":"), data...))
 	return fmt.Sprintf("%x", h[:8])
 }
@@ -434,7 +437,10 @@ func (lf *LiveFlow) flushToolCalls(
 		return
 	}
 
-	_ = conn.Send(ctx, &model.LiveRequest{ToolResponse: responses})
+	if err := conn.Send(ctx, &model.LiveRequest{ToolResponse: responses}); err != nil {
+		eventCh <- eventOrError{err: fmt.Errorf("failed to send tool response: %w", err)}
+		return
+	}
 	lf.emitFunctionResponseEvent(ctx, invCtx, responses, eventCh)
 }
 

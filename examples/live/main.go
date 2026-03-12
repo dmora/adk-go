@@ -174,7 +174,10 @@ func printEvent(ev *session.Event) {
 			fmt.Printf("[%s] calling %s(%v)\n", ev.Author, part.FunctionCall.Name, part.FunctionCall.Args)
 		}
 		if part.InlineData != nil && strings.HasPrefix(part.InlineData.MIMEType, "audio/") {
-			n, _ := audioOut.Write(part.InlineData.Data)
+			n, err := audioOut.Write(part.InlineData.Data)
+			if err != nil {
+				log.Printf("write audio: %v", err)
+			}
 			totalAudioBytes += n
 			fmt.Printf("\r  [audio] %d bytes received", totalAudioBytes)
 		}

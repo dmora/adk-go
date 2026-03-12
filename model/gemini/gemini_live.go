@@ -98,12 +98,14 @@ func mapServerMessage(msg *genai.LiveServerMessage) *model.LLMResponse {
 
 		if sc.InputTranscription != nil && sc.InputTranscription.Text != "" {
 			resp.CustomMetadata["transcript_type"] = "input"
+			resp.CustomMetadata["transcript_text"] = sc.InputTranscription.Text
 			if resp.Content == nil {
-				resp.Content = genai.NewContentFromText(sc.InputTranscription.Text, "model")
+				resp.Content = genai.NewContentFromText(sc.InputTranscription.Text, "user")
 			}
 		}
 		if sc.OutputTranscription != nil && sc.OutputTranscription.Text != "" {
 			resp.CustomMetadata["transcript_type"] = "output"
+			resp.CustomMetadata["transcript_text"] = sc.OutputTranscription.Text
 			if resp.Content == nil {
 				resp.Content = genai.NewContentFromText(sc.OutputTranscription.Text, "model")
 			}
