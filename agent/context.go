@@ -90,6 +90,10 @@ type InvocationContext interface {
 	// RunConfig stores the runtime configuration used during this invocation.
 	RunConfig() *RunConfig
 
+	// LiveRequestQueue returns the live request queue for bidi streaming.
+	// Returns nil if not in live mode.
+	LiveRequestQueue() *LiveRequestQueue
+
 	// EndInvocation ends the current invocation. This stops any planned agent
 	// calls.
 	EndInvocation()

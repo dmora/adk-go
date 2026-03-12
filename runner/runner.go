@@ -286,6 +286,120 @@ func (r *Runner) appendMessageToSession(ctx agent.InvocationContext, storedSessi
 	return ctx, nil
 }
 
+// RunLive runs the agent in live bidirectional streaming mode.
+// Unlike Run(), it always uses the root agent and does not append an initial user message.
+// Audio events (CustomMetadata["is_audio"]==true) are not persisted to the session.
+func (r *Runner) RunLive(
+	ctx context.Context,
+	userID, sessionID string,
+	queue *agent.LiveRequestQueue,
+	cfg agent.RunConfig,
+) iter.Seq2[*session.Event, error] {
+	cfg.StreamingMode = agent.StreamingModeBidi
+	return func(yield func(*session.Event, error) bool) {
+		resp, err := r.sessionService.Get(ctx, &session.GetRequest{
+			AppName:   r.appName,
+			UserID:    userID,
+			SessionID: sessionID,
+		})
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		storedSession := resp.Session
+
+		ctx = parentmap.ToContext(ctx, r.parents)
+		ctx = runconfig.ToContext(ctx, &runconfig.RunConfig{
+			StreamingMode: runconfig.StreamingMode(cfg.StreamingMode),
+		})
+		ctx = plugininternal.ToContext(ctx, r.pluginManager)
+
+		artifacts, memoryImpl := r.resolveServices(storedSession)
+
+		invCtx := icontext.NewInvocationContext(ctx, icontext.InvocationContextParams{
+			Artifacts:        artifacts,
+			Memory:           memoryImpl,
+			Session:          storedSession,
+			Agent:            r.rootAgent,
+			RunConfig:        &cfg,
+			LiveRequestQueue: queue,
+		})
+
+		pluginManager := r.pluginManager
+		if pluginManager != nil {
+			defer pluginManager.RunAfterRunCallback(invCtx)
+			earlyExitResult, err := pluginManager.RunBeforeRunCallback(invCtx)
+			if earlyExitResult != nil || err != nil {
+				yield(nil, err)
+				return
+			}
+		}
+
+		for event, err := range r.rootAgent.Run(invCtx) {
+			if err != nil {
+				if !yield(event, err) {
+					return
+				}
+				continue
+			}
+
+			if pluginManager != nil {
+				modifiedEvent, cbErr := pluginManager.RunOnEventCallback(invCtx, event)
+				if cbErr != nil {
+					if !yield(nil, cbErr) {
+						return
+					}
+					continue
+				}
+				if modifiedEvent != nil {
+					event = modifiedEvent
+				}
+			}
+
+			// Persist non-partial, non-audio events
+			isAudio := false
+			if event.LLMResponse.CustomMetadata != nil {
+				if v, ok := event.LLMResponse.CustomMetadata["is_audio"].(bool); ok {
+					isAudio = v
+				}
+			}
+			if !event.LLMResponse.Partial && !isAudio {
+				if err := r.sessionService.AppendEvent(ctx, storedSession, event); err != nil {
+					yield(nil, fmt.Errorf("failed to add event to session: %w", err))
+					return
+				}
+			}
+
+			if !yield(event, nil) {
+				return
+			}
+		}
+	}
+}
+
+func (r *Runner) resolveServices(storedSession session.Session) (agent.Artifacts, agent.Memory) {
+	var artifacts agent.Artifacts
+	if r.artifactService != nil {
+		artifacts = &artifactinternal.Artifacts{
+			Service:   r.artifactService,
+			SessionID: storedSession.ID(),
+			AppName:   storedSession.AppName(),
+			UserID:    storedSession.UserID(),
+		}
+	}
+
+	var memoryImpl agent.Memory
+	if r.memoryService != nil {
+		memoryImpl = &imemory.Memory{
+			Service:   r.memoryService,
+			SessionID: storedSession.ID(),
+			UserID:    storedSession.UserID(),
+			AppName:   storedSession.AppName(),
+		}
+	}
+	return artifacts, memoryImpl
+}
+
 // findAgentToRun returns the agent that should handle the next request based on
 // session history.
 func (r *Runner) findAgentToRun(session session.Session, msg *genai.Content) (agent.Agent, error) {
