@@ -34,7 +34,8 @@ type LLMRequest struct {
 	Contents []*genai.Content
 	Config   *genai.GenerateContentConfig
 
-	Tools map[string]any `json:"-"`
+	LiveConfig *genai.LiveConnectConfig `json:"-"`
+	Tools      map[string]any           `json:"-"`
 }
 
 // LLMResponse is the raw LLM response.
@@ -62,4 +63,27 @@ type LLMResponse struct {
 	ErrorMessage string
 	FinishReason genai.FinishReason
 	AvgLogprobs  float64
+}
+
+// LiveConnection represents an active bidirectional connection to a live model.
+type LiveConnection interface {
+	Send(ctx context.Context, req *LiveRequest) error
+	Receive(ctx context.Context) (*LLMResponse, error)
+	Close() error
+}
+
+// LiveCapableLLM is an optional interface for LLM implementations
+// that support live bidirectional streaming connections.
+type LiveCapableLLM interface {
+	LLM
+	ConnectLive(ctx context.Context, req *LLMRequest) (LiveConnection, error)
+}
+
+// LiveRequest discriminates between message types sent to a live connection.
+// Exactly one field should be set per request.
+type LiveRequest struct {
+	Content       *genai.Content
+	RealtimeInput *genai.LiveRealtimeInput
+	ToolResponse  []*genai.FunctionResponse
+	Close         bool
 }

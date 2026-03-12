@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"iter"
 	"strings"
+	"time"
 
 	"google.golang.org/genai"
 
@@ -359,6 +360,10 @@ type llmAgent struct {
 type agentState = agentinternal.State
 
 func (a *llmAgent) run(ctx agent.InvocationContext) iter.Seq2[*session.Event, error] {
+	if ctx.RunConfig() != nil && ctx.RunConfig().StreamingMode == agent.StreamingModeBidi {
+		return a.runLive(ctx)
+	}
+
 	// TODO: branch context?
 	ctx = icontext.NewInvocationContext(ctx, icontext.InvocationContextParams{
 		Artifacts:    ctx.Artifacts(),
@@ -391,6 +396,103 @@ func (a *llmAgent) run(ctx agent.InvocationContext) iter.Seq2[*session.Event, er
 			}
 		}
 	}
+}
+
+func (a *llmAgent) runLive(ctx agent.InvocationContext) iter.Seq2[*session.Event, error] {
+	ctx = icontext.NewInvocationContext(ctx, icontext.InvocationContextParams{
+		Artifacts:        ctx.Artifacts(),
+		Memory:           ctx.Memory(),
+		Session:          ctx.Session(),
+		Branch:           ctx.Branch(),
+		Agent:            a,
+		UserContent:      ctx.UserContent(),
+		RunConfig:        ctx.RunConfig(),
+		InvocationID:     ctx.InvocationID(),
+		LiveRequestQueue: ctx.LiveRequestQueue(),
+	})
+
+	liveLLM, ok := a.model.(model.LiveCapableLLM)
+	if !ok {
+		return llminternal.ErrIter(fmt.Errorf("model %q does not support live connections", a.model.Name()))
+	}
+
+	queue := ctx.LiveRequestQueue()
+	if queue == nil {
+		return llminternal.ErrIter(fmt.Errorf("live mode requires a LiveRequestQueue"))
+	}
+
+	req := &model.LLMRequest{Model: a.model.Name()}
+	if ctx.RunConfig() != nil {
+		req.LiveConfig = liveConfigFromRunConfig(ctx.RunConfig())
+	}
+	if req.LiveConfig == nil {
+		req.LiveConfig = &genai.LiveConnectConfig{}
+	}
+	req.LiveConfig.SystemInstruction = genai.NewContentFromText(a.instruction, "user")
+	req.LiveConfig.Tools = buildLiveTools(a.Tools)
+
+	conn, err := liveLLM.ConnectLive(ctx, req)
+	if err != nil {
+		return llminternal.ErrIter(fmt.Errorf("failed to connect live: %w", err))
+	}
+
+	coalesceWindow := time.Duration(0)
+	if ctx.RunConfig() != nil {
+		coalesceWindow = ctx.RunConfig().ToolCoalesceWindow
+	}
+	if coalesceWindow == 0 {
+		coalesceWindow = 150 * time.Millisecond
+	}
+
+	lf := &llminternal.LiveFlow{
+		Model:                a.model,
+		Tools:                a.Tools,
+		BeforeToolCallbacks:  a.beforeToolCallbacks,
+		AfterToolCallbacks:   a.afterToolCallbacks,
+		OnToolErrorCallbacks: a.onToolErrorCallbacks,
+		CoalesceWindow:       coalesceWindow,
+	}
+
+	return lf.RunLive(ctx, conn, queue)
+}
+
+func liveConfigFromRunConfig(rc *agent.RunConfig) *genai.LiveConnectConfig {
+	if rc == nil {
+		return nil
+	}
+	cfg := &genai.LiveConnectConfig{}
+	if len(rc.ResponseModalities) > 0 {
+		cfg.ResponseModalities = rc.ResponseModalities
+	}
+	if rc.SpeechConfig != nil {
+		cfg.SpeechConfig = rc.SpeechConfig
+	}
+	if rc.InputAudioTranscription {
+		cfg.InputAudioTranscription = &genai.AudioTranscriptionConfig{}
+	}
+	if rc.OutputAudioTranscription {
+		cfg.OutputAudioTranscription = &genai.AudioTranscriptionConfig{}
+	}
+	return cfg
+}
+
+type declarable interface {
+	Declaration() *genai.FunctionDeclaration
+}
+
+func buildLiveTools(tools []tool.Tool) []*genai.Tool {
+	var decls []*genai.FunctionDeclaration
+	for _, t := range tools {
+		if dt, ok := t.(declarable); ok {
+			if d := dt.Declaration(); d != nil {
+				decls = append(decls, d)
+			}
+		}
+	}
+	if len(decls) == 0 {
+		return nil
+	}
+	return []*genai.Tool{{FunctionDeclarations: decls}}
 }
 
 // maybeSaveOutputToState saves the model output to state if needed. skip if the event

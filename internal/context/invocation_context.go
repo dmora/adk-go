@@ -32,10 +32,11 @@ type InvocationContextParams struct {
 	Branch string
 	Agent  agent.Agent
 
-	UserContent   *genai.Content
-	RunConfig     *agent.RunConfig
-	EndInvocation bool
-	InvocationID  string
+	UserContent      *genai.Content
+	RunConfig        *agent.RunConfig
+	EndInvocation    bool
+	InvocationID     string
+	LiveRequestQueue *agent.LiveRequestQueue
 }
 
 func NewInvocationContext(ctx context.Context, params InvocationContextParams) agent.InvocationContext {
@@ -84,6 +85,10 @@ func (c *InvocationContext) UserContent() *genai.Content {
 
 func (c *InvocationContext) RunConfig() *agent.RunConfig {
 	return c.params.RunConfig
+}
+
+func (c *InvocationContext) LiveRequestQueue() *agent.LiveRequestQueue {
+	return c.params.LiveRequestQueue
 }
 
 func (c *InvocationContext) EndInvocation() {
