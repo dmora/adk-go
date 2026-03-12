@@ -574,7 +574,6 @@ func (lf *LiveFlow) callToolLive(
 	wrappedCtx := &cancelableToolContext{Context: toolCtx, cancelCtx: ctx}
 
 	response, err := lf.runToolWithCallbacks(wrappedCtx, invCtx, funcTool, fc.Args)
-
 	if err != nil {
 		return map[string]any{"error": err.Error()}
 	}

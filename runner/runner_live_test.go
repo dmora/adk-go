@@ -490,7 +490,7 @@ func TestScenario3_InFlightToolCancellation(t *testing.T) {
 	})
 
 	svc := &mockSessionService{Service: session.InMemoryService()}
-	svc.Service.Create(context.Background(), &session.CreateRequest{
+	_, _ = svc.Service.Create(context.Background(), &session.CreateRequest{
 		AppName: "test", UserID: "user1", SessionID: "sess1",
 	})
 
@@ -601,7 +601,7 @@ func TestScenario5_SendError(t *testing.T) {
 	queue := agent.NewLiveRequestQueue(100)
 	// Pre-load a message but don't close queue yet — the sender must
 	// attempt the send (and fail) before exiting via queue.Done().
-	queue.Send(context.Background(), &model.LiveRequest{Content: genai.NewContentFromText("new q", "user")})
+	_ = queue.Send(context.Background(), &model.LiveRequest{Content: genai.NewContentFromText("new q", "user")})
 	go func() {
 		time.Sleep(200 * time.Millisecond)
 		queue.Close()
@@ -641,7 +641,7 @@ func TestScenario6_HistoryHandoff(t *testing.T) {
 	r, _, _ := setupRunnerWithEvents(t, conn, nil, nil, priorEvents)
 
 	queue := agent.NewLiveRequestQueue(100)
-	queue.Send(context.Background(), &model.LiveRequest{
+	_ = queue.Send(context.Background(), &model.LiveRequest{
 		Content: genai.NewContentFromText("new question", "user"),
 	})
 
@@ -789,7 +789,7 @@ func TestScenario8_QueueConcurrency(t *testing.T) {
 	// Backpressure test: send with tiny timeout on full buffer
 	queue2 := agent.NewLiveRequestQueue(1)
 	// fill the buffer
-	queue2.Send(context.Background(), &model.LiveRequest{})
+	_ = queue2.Send(context.Background(), &model.LiveRequest{})
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 	defer cancel()
 	time.Sleep(2 * time.Nanosecond)
@@ -875,7 +875,7 @@ func TestScenario10_ToolCallCoalescing(t *testing.T) {
 	})
 
 	svc := &mockSessionService{Service: session.InMemoryService()}
-	svc.Service.Create(context.Background(), &session.CreateRequest{
+	_, _ = svc.Service.Create(context.Background(), &session.CreateRequest{
 		AppName: "test", UserID: "user1", SessionID: "sess1",
 	})
 
@@ -972,7 +972,7 @@ func TestScenario11_ModelSpeakingStateTransitions(t *testing.T) {
 	})
 
 	svc := &mockSessionService{Service: session.InMemoryService()}
-	svc.Service.Create(context.Background(), &session.CreateRequest{
+	_, _ = svc.Service.Create(context.Background(), &session.CreateRequest{
 		AppName: "test", UserID: "user1", SessionID: "sess1",
 	})
 

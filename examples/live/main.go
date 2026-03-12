@@ -46,8 +46,10 @@ type weatherResult struct {
 	Condition string `json:"condition"`
 }
 
-var audioOut *os.File
-var totalAudioBytes int
+var (
+	audioOut        *os.File
+	totalAudioBytes int
+)
 
 func main() {
 	ctx := context.Background()
@@ -58,7 +60,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("create output.pcm: %v", err)
 	}
-	defer audioOut.Close()
+	defer func() { _ = audioOut.Close() }()
 
 	fmt.Println("Connected to Gemini Live (audio + transcription).")
 	fmt.Println("---")
