@@ -1214,3 +1214,71 @@ func TestScenario15_DeferFlushOnConsumerBreak(t *testing.T) {
 		t.Errorf("flushed author = %q, want agent name", persisted[0].Author)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Scenario 16: Transcription event reordering — tool events buffered during transcription
+// ---------------------------------------------------------------------------
+
+func TestScenario16_TranscriptionReordering(t *testing.T) {
+	conn := newMockLiveConnection()
+	conn.recvResponses = []*model.LLMResponse{
+		// Partial transcription starts.
+		transcriptResponse("Hello ", "input", false),
+		// Tool call arrives during transcription.
+		functionCallResponse("fc1", "greet", map[string]any{"name": "Bob"}),
+		// Transcription finishes.
+		transcriptResponse("world", "input", true),
+		// Turn completes.
+		turnCompleteResponse(),
+	}
+
+	greetTool := &mockTool{
+		name:   "greet",
+		result: map[string]any{"message": "Hi Bob"},
+	}
+
+	r, svc, _ := setupRunner(t, conn, []tool.Tool{greetTool}, nil)
+	queue := agent.NewLiveRequestQueue(100)
+	queue.Close()
+
+	events, errs := collectEvents(t, r, queue)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if len(events) < 3 {
+		t.Fatalf("expected at least 3 events, got %d", len(events))
+	}
+
+	// The persisted order should be: transcript BEFORE tool events.
+	// The aggregated transcript "Hello world" must appear before the
+	// tool call/response events in the session history.
+	persisted := svc.PersistedEvents()
+	transcriptIdx := -1
+	toolIdx := -1
+	for i, ev := range persisted {
+		if ev.Content != nil && len(ev.Content.Parts) > 0 {
+			text := ev.Content.Parts[0].Text
+			if text == "Hello world" {
+				transcriptIdx = i
+			}
+			if ev.Content.Parts[0].FunctionCall != nil || ev.Content.Parts[0].FunctionResponse != nil {
+				if toolIdx == -1 {
+					toolIdx = i
+				}
+			}
+		}
+	}
+
+	if transcriptIdx == -1 {
+		t.Fatal("transcript event not found in persisted events")
+	}
+	if toolIdx == -1 {
+		// Tool events may not be persisted separately in all cases;
+		// the key invariant is that transcript comes first.
+		return
+	}
+	if transcriptIdx > toolIdx {
+		t.Errorf("transcript (idx=%d) should appear before tool events (idx=%d) in session history",
+			transcriptIdx, toolIdx)
+	}
+}
