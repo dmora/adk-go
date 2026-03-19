@@ -394,8 +394,9 @@ func (r *Runner) RunLive(
 		// Reorder state: buffer tool events that arrive during an active
 		// transcription so the completed transcript is persisted first.
 		var (
-			isTranscribing bool
-			reorderBuffer  []*session.Event
+			isInputTranscribing  bool
+			isOutputTranscribing bool
+			reorderBuffer        []*session.Event
 		)
 
 		defer func() {
@@ -440,19 +441,19 @@ func (r *Runner) RunLive(
 				}
 			}
 
-			// Track transcription state for reordering: tool events that arrive
-			// while a transcription is in progress are buffered so the completed
-			// transcript appears before them in the session history.
-			if isPartialTranscription(event) {
-				isTranscribing = true
+			// Track per-stream transcription state for reordering.
+			if event.InputTranscription != nil {
+				isInputTranscribing = !event.InputTranscription.Finished
 			}
+			if event.OutputTranscription != nil {
+				isOutputTranscribing = !event.OutputTranscription.Finished
+			}
+			anyTranscribing := isInputTranscribing || isOutputTranscribing
 
-			// Buffer tool events during active transcription.
-			if isTranscribing && isToolEvent(event) {
+			// Buffer tool events during active transcription — do NOT yield
+			// them yet so the completed transcript is yielded first.
+			if anyTranscribing && isToolEvent(event) {
 				reorderBuffer = append(reorderBuffer, event)
-				if !yield(event, nil) {
-					return
-				}
 				continue
 			}
 
@@ -473,20 +474,21 @@ func (r *Runner) RunLive(
 					yield(nil, fmt.Errorf("failed to persist input transcript: %w", err))
 					return
 				}
-				// When a transcription finishes, flush the reorder buffer so
-				// buffered tool events are persisted after the transcript.
-				if event.InputTranscription.Finished {
-					isTranscribing = false
+				if !yield(event, nil) {
+					return
+				}
+				// Flush reorder buffer only when ALL transcription streams are done.
+				if !anyTranscribing && len(reorderBuffer) > 0 {
 					for _, buffered := range reorderBuffer {
 						if err := r.sessionService.AppendEvent(ctx, storedSession, buffered); err != nil {
 							yield(nil, fmt.Errorf("failed to persist reordered event: %w", err))
 							return
 						}
+						if !yield(buffered, nil) {
+							return
+						}
 					}
 					reorderBuffer = nil
-				}
-				if !yield(event, nil) {
-					return
 				}
 				continue
 			}
@@ -497,19 +499,21 @@ func (r *Runner) RunLive(
 					yield(nil, fmt.Errorf("failed to persist output transcript: %w", err))
 					return
 				}
-				// When a transcription finishes, flush the reorder buffer.
-				if event.OutputTranscription.Finished {
-					isTranscribing = false
+				if !yield(event, nil) {
+					return
+				}
+				// Flush reorder buffer only when ALL transcription streams are done.
+				if !anyTranscribing && len(reorderBuffer) > 0 {
 					for _, buffered := range reorderBuffer {
 						if err := r.sessionService.AppendEvent(ctx, storedSession, buffered); err != nil {
 							yield(nil, fmt.Errorf("failed to persist reordered event: %w", err))
 							return
 						}
+						if !yield(buffered, nil) {
+							return
+						}
 					}
 					reorderBuffer = nil
-				}
-				if !yield(event, nil) {
-					return
 				}
 				continue
 			}
@@ -653,11 +657,4 @@ func findAgent(curAgent agent.Agent, targetName string) agent.Agent {
 // isToolEvent returns true if the event contains function calls or responses.
 func isToolEvent(event *session.Event) bool {
 	return len(utils.FunctionCalls(event.Content)) > 0 || len(utils.FunctionResponses(event.Content)) > 0
-}
-
-// isPartialTranscription returns true if the event is a transcription chunk
-// that has not yet finished.
-func isPartialTranscription(event *session.Event) bool {
-	return (event.InputTranscription != nil && !event.InputTranscription.Finished) ||
-		(event.OutputTranscription != nil && !event.OutputTranscription.Finished)
 }
